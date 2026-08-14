@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { createAppIcon } from './icon'
 
 export function createMainWindow(url: string, closeToTray: () => boolean): BrowserWindow {
   const window = new BrowserWindow({
@@ -8,6 +9,7 @@ export function createMainWindow(url: string, closeToTray: () => boolean): Brows
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
+    icon: createAppIcon(),
     title: 'DeepSeek Harness Desktop',
     webPreferences: {
       contextIsolation: true,

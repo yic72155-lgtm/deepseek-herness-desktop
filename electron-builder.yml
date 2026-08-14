@@ -1,6 +1,6 @@
 appId: com.deepseekai.harness.desktop
 productName: DeepSeek Harness Desktop
-asar: false
+asar: true
 npmRebuild: false
 
 directories:
@@ -11,6 +11,7 @@ files:
   - package.json
 
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch:
@@ -28,7 +29,6 @@ nsis:
 portable:
   artifactName: ${productName}-${version}-portable.exe
 
-publish:
-  provider: github
-  owner: yic72155-lgtm
-  repo: deepseek-herness-desktop
+extraResources:
+  - from: build/icon.png
+    to: icon.png
