@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+backend/
+_trash_node_modules_pnpm/
+pnpm-lock.yaml
+pnpm-workspace.yaml
+*.log
