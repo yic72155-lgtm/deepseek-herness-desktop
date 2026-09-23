@@ -2,9 +2,15 @@
 /**
  * 把更新产物上传到 OSS（阿里云对象存储）。
  *
- * 上传顺序是关键：先传安装包与 blockmap，再传 policy.json，最后才传 latest.yml。
- * 客户端一旦读到 latest.yml 就会立刻去下载 exe；如果清单先到而安装包还没到，
- * 这个窗口期内的用户会拿到 404。
+ * 两个刻意的设计：
+ *
+ * 1) 上传顺序：先传安装包与 blockmap，再传 policy.json，最后才传 latest.yml。
+ *    客户端一旦读到 latest.yml 就会立刻去下载 exe；若清单先到而安装包还没到，
+ *    这个窗口期内的用户会拿到 404。
+ *
+ * 2) 大文件走分片并发上传，并把超时放到 10 分钟。
+ *    ali-oss 默认响应超时只有 60 秒；GitHub 的 runner 在海外，跨境往国内 OSS
+ *    传 127 MB 单请求必然超时（实测 ResponseTimeoutError）。分片 + 长超时可解。
  *
  * 用法：
  *   node scripts/upload-oss.mjs             实际上传
@@ -22,6 +28,14 @@ const DRY_RUN = process.argv.includes('--dry-run')
 const REGION = process.env.OSS_REGION ?? 'oss-cn-beijing'
 const BUCKET = process.env.OSS_BUCKET ?? 'deepseek-harness-upgrade'
 const PREFIX = (process.env.OSS_PREFIX ?? 'win').replace(/^\/+|\/+$/gu, '')
+
+/** 跨境上传慢：单请求超时给到 10 分钟。 */
+const REQUEST_TIMEOUT = 10 * 60 * 1000
+/** 小于该体积走简单上传，否则分片。 */
+const MULTIPART_THRESHOLD = 1024 * 1024
+/** 分片大小与并发数（127 MB → 约 26 片，4 路并发）。 */
+const PART_SIZE = 5 * 1024 * 1024
+const PARALLEL = 4
 
 /** 清单类文件不能长缓存，否则客户端长时间看不到新版本。 */
 const NO_CACHE = 'no-cache, no-store, must-revalidate'
@@ -69,7 +83,7 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-console.log(`目标：oss://${BUCKET}/${PREFIX}/  版本 ${version}`)
+console.log(`目标：oss://${BUCKET}/${PREFIX}/  版本 ${version}  区域 ${REGION}`)
 for (const item of plan) {
   const size = item.file === undefined ? `${item.body.length} B（生成）` : `${statSync(item.file).size} B`
   console.log(`  ${item.key}  ${size}`)
@@ -88,32 +102,60 @@ if (accessKeyId === undefined || accessKeySecret === undefined) {
   process.exit(1)
 }
 
-const client = new OSS({ region: REGION, accessKeyId, accessKeySecret, bucket: BUCKET })
+const client = new OSS({
+  region: REGION,
+  accessKeyId,
+  accessKeySecret,
+  bucket: BUCKET,
+  timeout: REQUEST_TIMEOUT,
+})
+
+/** 打印带错误码的诊断：CI 日志里默认只有一句 "command failed"，定位不了问题。 */
+function reportFailure(key, error) {
+  console.error(`\n上传失败：${key}`)
+  console.error('  name      :', error?.name ?? '-')
+  console.error('  code      :', error?.code ?? '-')
+  console.error('  status    :', error?.status ?? '-')
+  console.error('  message   :', error?.message ?? String(error))
+  console.error('  requestId :', error?.requestId ?? '-')
+  console.error('\n常见原因对照：')
+  console.error('  InvalidAccessKeyId / SignatureDoesNotMatch → Secret 值不对或名字拼错')
+  console.error('  AccessDenied                              → RAM 策略没覆盖该 bucket')
+  console.error('  NoSuchBucket                              → OSS_BUCKET 名字不对')
+  console.error('  ResponseTimeoutError / ECONNRESET         → 网络慢或跨境链路不稳，重跑即可')
+  process.exit(1)
+}
 
 for (const item of plan) {
-  const content = item.file ?? item.body
+  const headers = {
+    'Content-Type': contentTypeOf(item.key),
+    'Cache-Control': item.cache,
+  }
+
   try {
-    await client.put(item.key, content, {
-      headers: {
-        'Content-Type': contentTypeOf(item.key),
-        'Cache-Control': item.cache,
-      },
+    if (item.body !== undefined) {
+      await client.put(item.key, item.body, { headers, timeout: REQUEST_TIMEOUT })
+      console.log(`uploaded  ${item.key}  (${item.body.length} B)`)
+      continue
+    }
+
+    const size = statSync(item.file).size
+    if (size < MULTIPART_THRESHOLD) {
+      await client.put(item.key, item.file, { headers, timeout: REQUEST_TIMEOUT })
+      console.log(`uploaded  ${item.key}  (${size} B)`)
+      continue
+    }
+
+    console.log(`uploading ${item.key}  (${size} B, 分片 ${PART_SIZE / 1024 / 1024} MB x${PARALLEL})`)
+    await client.multipartUpload(item.key, item.file, {
+      partSize: PART_SIZE,
+      parallel: PARALLEL,
+      headers,
+      timeout: REQUEST_TIMEOUT,
     })
-    console.log(`uploaded  ${item.key}`)
+    console.log(`uploaded  ${item.key}  (${size} B)`)
   } catch (error) {
-    // 把阿里云返回的错误码与 requestId 打出来，否则 CI 日志里只有一句 "command failed"。
-    console.error(`\n上传失败：${item.key}`)
-    console.error('  name      :', error?.name ?? '-')
-    console.error('  code      :', error?.code ?? '-')
-    console.error('  status    :', error?.status ?? '-')
-    console.error('  message   :', error?.message ?? String(error))
-    console.error('  requestId :', error?.requestId ?? '-')
-    console.error('\n常见原因对照：')
-    console.error('  InvalidAccessKeyId / SignatureDoesNotMatch → Secret 值不对或名字拼错')
-    console.error('  AccessDenied                              → RAM 策略没覆盖该 bucket')
-    console.error('  NoSuchBucket                              → OSS_BUCKET 名字不对')
-    console.error('  net timeout / ECONNRESET                  → 网络问题，重跑即可')
-    process.exit(1)
+    reportFailure(item.key, error)
   }
 }
 
