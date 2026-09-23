@@ -27,6 +27,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify README mentions the release version
+        shell: pwsh
+        # 每次发版都必须更新 README 的「当前版本」与「版本历史」。
+        # 这里做硬校验：漏了就失败，而不是让一份过时的 README 跟着发布出去。
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $readme = Get-Content README.md -Raw
+          if ($readme -notmatch [regex]::Escape($version)) {
+            Write-Error "README.md 里找不到当前版本号 $version —— 请先更新 README 的「当前版本」与「版本历史」，再发版。"
+            exit 1
+          }
+          Write-Host "README 已包含版本 $version"
+
       - name: Build and package
         # release 脚本已带 --publish never：electron-builder 只产出本地文件。
         # 发布动作交给下面的 GitHub Release 与 OSS 两步，避免它去碰 generic provider。
