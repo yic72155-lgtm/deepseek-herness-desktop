@@ -10,6 +10,55 @@ export interface BackendHandle {
   url: string
 }
 
+/**
+ * 逐文件解压，读不到的条目跳过。
+ *
+ * 注意路径格式：listPackage 在 Windows 上返回带前导反斜杠的路径（`\node_modules\x`），
+ * 而 extractFile 只接受去掉前导分隔符、且**保留原始分隔符**的形式
+ * （转成正斜杠反而会找不到）。这些都是实测出来的。
+ */
+function extractIndividually(archive: string, destination: string): number {
+  const entries = asar.listPackage(archive, { isPack: false })
+  let unreadable = 0
+
+  for (const entry of entries) {
+    const relative = entry.replace(/^[\\/]+/u, '')
+    if (relative === '') continue
+
+    try {
+      const content = asar.extractFile(archive, relative)
+      const target = path.join(destination, relative)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, content)
+    } catch {
+      // 目录条目、以及本平台用不到的架构二进制都会走到这里。
+      unreadable += 1
+    }
+  }
+
+  return unreadable
+}
+
+/**
+ * 解压 app.asar 到目标目录。
+ *
+ * 先走 extractAll（一次性、快）；但它遇到任何一个缺失的 unpacked 文件都会整体抛错，
+ * 而 electron-builder 会剔除与目标架构不匹配的原生二进制
+ * （实测：CI 的 win-x64 构建缺少 node-pty 的 win32-arm64 / win10-arm64 共 6 个文件，
+ * 导致应用在解压阶段就崩掉、完全无法启动）。
+ * 因此失败时回退到逐文件解压并跳过读不到的条目 —— 那些文件在本平台永远用不到。
+ *
+ * @returns 跳过的条目数，用于日志。
+ */
+function extractRuntime(archive: string, destination: string): number {
+  try {
+    asar.extractAll(archive, destination)
+    return 0
+  } catch {
+    return extractIndividually(archive, destination)
+  }
+}
+
 function resolveBackendRoot(): string {
   if (app.isPackaged) {
     const runtimeRoot = path.join(app.getPath('userData'), 'runtime')
@@ -21,7 +70,12 @@ function resolveBackendRoot(): string {
     if (!fs.existsSync(dshPackage) || !fs.existsSync(versionFile) || fs.readFileSync(versionFile, 'utf8') !== version) {
       fs.rmSync(runtimeRoot, { recursive: true, force: true })
       fs.mkdirSync(extractedApp, { recursive: true })
-      asar.extractAll(app.getAppPath(), extractedApp)
+
+      const skipped = extractRuntime(app.getAppPath(), extractedApp)
+      if (skipped > 0) {
+        console.warn(`[shell] runtime extraction fell back to per-file mode, skipped ${skipped} unreadable entries`)
+      }
+
       fs.writeFileSync(versionFile, version)
     }
 
