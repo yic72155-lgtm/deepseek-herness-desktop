@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { type BackendHandle, startBackend, stopBackend, waitForBackend } from './backend'
 import { findAvailablePort } from './port'
 import { createTray } from './tray'
+import { guardMinimumVersion, installUpdater } from './updater'
 import { createMainWindow } from './window'
 
 const PREFERRED_PORT = 3080
@@ -19,6 +20,15 @@ async function launch(): Promise<void> {
   try {
     splashWindow = createSplashWindow()
 
+    // 强制更新门：低于最低支持版本时不启动后端与主界面。
+    // 策略拉取失败会立即放行，所以正常网络下这一步几乎不增加启动耗时。
+    const allowed = await guardMinimumVersion()
+    if (!allowed) {
+      splashWindow?.close()
+      splashWindow = null
+      return
+    }
+
     const port = await findAvailablePort(PREFERRED_PORT)
     backend = startBackend(port)
     await waitForBackend(backend)
@@ -30,6 +40,9 @@ async function launch(): Promise<void> {
     mainWindow.on('closed', () => {
       mainWindow = null
     })
+
+    // 普通更新检查：延迟执行、失败静默，不阻塞启动。
+    installUpdater()
 
     createTray(port, {
       show: () => {

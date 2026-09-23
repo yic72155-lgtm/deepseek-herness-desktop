@@ -10,6 +10,17 @@ files:
   - dist/**/*
   - package.json
 
+# 更新源：地址会被编译进客户端（resources/app-update.yml），
+# 所以改动这里必须重新打包，客户端才会指向新地址。
+# 结尾必须有斜杠：electron-updater 会拼成 <url>latest.yml 与 <url>policy.json。
+publish:
+  provider: generic
+  url: https://deepseek-harness-upgrade.oss-cn-beijing.aliyuncs.com/win/
+  channel: latest
+
+# 固定产物名：latest.yml 里的 url 与磁盘文件名必须完全一致，否则下载 404。
+artifactName: DeepSeek-Harness-Desktop-Setup-${version}.exe
+
 win:
   icon: build/icon.png
   target:
@@ -25,9 +36,12 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  # 生成 .exe.blockmap，让 electron-updater 只下载变化的块（省流量的大头）
+  differentialPackage: true
 
 portable:
-  artifactName: ${productName}-${version}-portable.exe
+  # 便携版不支持自动更新，仅固定命名避免与安装版混淆
+  artifactName: DeepSeek-Harness-Desktop-${version}-portable.exe
 
 extraResources:
   - from: build/icon.png
