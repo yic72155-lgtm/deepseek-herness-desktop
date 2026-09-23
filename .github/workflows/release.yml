@@ -40,6 +40,20 @@ jobs:
           }
           Write-Host "README 已包含版本 $version"
 
+      - name: Verify tag matches package.json version
+        # 防止把旧代码发布成新版本：tag 名必须与 package.json 的 version 完全一致。
+        # 起因：v0.1.3 曾因 commit 失败但 tag 仍被创建，导致 tag 指向旧提交。
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $version) {
+            Write-Error "tag v$tag 与 package.json 的版本 $version 不一致 —— tag 必须与 package.json 同版本，否则会把旧代码发布成新版本。"
+            exit 1
+          }
+          Write-Host "tag 与 package.json 版本一致：$version"
+
       - name: Build and package
         # release 脚本已带 --publish never：electron-builder 只产出本地文件。
         # 发布动作交给下面的 GitHub Release 与 OSS 两步，避免它去碰 generic provider。
