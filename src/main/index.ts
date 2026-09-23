@@ -1,11 +1,18 @@
 import { app, BrowserWindow, dialog } from 'electron'
-import { type BackendHandle, startBackend, stopBackend, waitForBackend } from './backend'
+import { type BackendHandle, backendUrl, startBackend, stopBackend, waitForBackend } from './backend'
 import { findAvailablePort } from './port'
 import { createTray } from './tray'
 import { guardMinimumVersion, installUpdater } from './updater'
 import { createMainWindow } from './window'
 
-const PREFERRED_PORT = 3080
+/**
+ * 首选端口。
+ *
+ * 刻意避开 3080：官方 `dsh web` 的默认端口就是它，用户机器上很可能
+ * 已经有一个命令行实例占着（实测本机就有）。从 3082 起找一个空闲端口，
+ * 既不会和原生 CLI 抢，也让地址在多次启动之间保持稳定。
+ */
+const PREFERRED_PORT = 3082
 
 let mainWindow: BrowserWindow | null = null
 let backend: BackendHandle | null = null
@@ -36,7 +43,7 @@ async function launch(): Promise<void> {
     splashWindow?.close()
     splashWindow = null
 
-    mainWindow = createMainWindow(backend.url, () => !isQuitting)
+    mainWindow = createMainWindow(backendUrl(backend), () => !isQuitting)
     mainWindow.on('closed', () => {
       mainWindow = null
     })
@@ -48,7 +55,7 @@ async function launch(): Promise<void> {
       show: () => {
         if (mainWindow === null || mainWindow.isDestroyed()) {
           if (backend !== null) {
-            mainWindow = createMainWindow(backend.url, () => !isQuitting)
+            mainWindow = createMainWindow(backendUrl(backend), () => !isQuitting)
             mainWindow.on('closed', () => {
               mainWindow = null
             })
@@ -119,7 +126,7 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow === null || mainWindow.isDestroyed()) {
     if (backend !== null) {
-      mainWindow = createMainWindow(backend.url, () => !isQuitting)
+      mainWindow = createMainWindow(backendUrl(backend), () => !isQuitting)
       mainWindow.on('closed', () => {
         mainWindow = null
       })

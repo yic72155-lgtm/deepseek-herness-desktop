@@ -23,6 +23,42 @@ npm run upload:oss:dry      # 预览上传清单，不会真上传
 - [ ] 构建零错误
 - [ ] `release/` 下有 `DeepSeek-Harness-Desktop-Setup-<版本>.exe`、同名 `.blockmap`、`latest.yml`
 
+### ✅ 校验 Electron 的 V8 指纹（改 Electron 版本时必做）
+
+内置运行时靠 `node-addon-require-builtin` 注入 Node 内部模块加载器，它**内置一张精确的 V8 指纹允许列表**；对不上就直接抛
+`node-addon-require-builtin unsupported`，应用完全起不来（不是降级，是启动失败）。
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE='1'
+.\node_modules\electron\dist\electron.exe -p "process.versions.v8"
+```
+
+- [ ] 输出必须是 `15.0.245.13-electron.0`、`15.2.124.13-electron.0`、`15.4.80-electron.0` 之一
+- [ ] `package.json` 里 `electron` 是**精确版本**（无 `^`）
+
+> **V8 在同一个 Electron 大版本内也会变**，所以 `^44.0.0` 会把应用装坏：
+> `44.0.0` 是 `15.2.124.13`（通过），而 `44.1.0` 已变成 `15.2.124.18`（拒绝）。
+
+### ✅ 校验运行时依赖是否完整打进包（改 dsh 版本时必做）
+
+`npm run pack` 末尾会自动跑 `scripts/verify-runtime-packages.mjs`，**失败即中止打包**。
+也可以随时单独跑：
+
+```powershell
+npm run verify:packages     # 静态检查，不需要先打包
+```
+
+- [ ] 静态检查通过（peer 闭包里的包都已在 `dependencies` 里直接声明）
+- [ ] 产物检查通过（这些都真的在 `app.asar` / `app.asar.unpacked` 里）
+
+> **为什么需要这条**：electron-builder **只收集 `dependencies`，不收集 `peerDependencies`**。
+> dsh 把大量接缝/协议包（`dsh-jobs`、`dsh-session-persistence`、`dsh-client-ui-slots` …）
+> 声明成 peerDependencies —— npm 会自动装上，所以**开发态完全正常**，
+> 但打包时被静默丢掉，用户装完启动才报
+> `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/dsh-jobs'`。
+> 0.2.0 就踩过一次：14 个插件 import 失败、dsh 拒绝启动、窗口停在初始化。
+> 修法是把这些包在 `package.json` 的 `dependencies` 里**显式列出**（脚本会把该加哪些直接打出来）。
+
 ## 3. ✅ 验证「CI 产物」，而不是本地产物
 
 > **只测本地产物 = 没测真正发给用户的东西。**
@@ -70,10 +106,12 @@ git push origin main --tags      # 触发 CI：构建 → GitHub Release → 上
 | GitHub Release | CI |
 | OSS 更新源上传 | CI（`scripts/upload-oss.mjs`，顺序：安装包 → blockmap → `policy.json` → `latest.yml` 最后） |
 | README 版本校验 | CI（缺失当前版本号即失败） |
+| **运行时依赖完整性** | **CI**（`npm run release` 末尾自动跑 `verify-runtime-packages.mjs`） |
 | **CI 产物实测** | **人** —— 必须在真机安装启动，无法自动化 |
 | README / 版本历史更新 | 人（CI 只校验有没有漏，不代写） |
 
-## 两个原则
+## 三个原则
 
 1. **本地产物通过 ≠ 发布产物通过。** 任何"只在本机验证过"的功能，都不算验证过。
 2. **发布源唯一。** 一切发布走 CI；本地打的包只用于自检，不要手工往 OSS 或 Releases 传（会让清单与安装包不是同一批）。
+3. **能自动拦住的错误，不要靠人记得。** 每踩一次只在"装完启动"才暴露的坑，就往前挪成一条构建期检查（V8 指纹、依赖完整性都是这么来的）。
