@@ -18,16 +18,23 @@
 
 ## 下载
 
-从 [Releases](https://github.com/yic72155-lgtm/deepseek-herness-desktop/releases/latest) 下载：
+**推荐用 OSS 直链**（国内访问稳定，不走 GitHub）：
 
-- `DeepSeek-Harness-Desktop-Setup-<版本>.exe` —— **安装版（推荐）**，只有安装版支持自动更新
-- `DeepSeek-Harness-Desktop-<版本>-portable.exe` —— 便携版，免安装，但**不支持自动更新**
+- **安装版（推荐，支持自动更新）**：
+  <https://deepseek-harness-upgrade.oss-cn-beijing.aliyuncs.com/win/DeepSeek-Harness-Desktop-Setup-0.1.3.exe>
+- 便携版（免安装，**不支持自动更新**）：
+  <https://deepseek-harness-upgrade.oss-cn-beijing.aliyuncs.com/win/DeepSeek-Harness-Desktop-0.1.3-portable.exe>
+
+也可以从 [Releases](https://github.com/yic72155-lgtm/deepseek-herness-desktop/releases/latest) 下载，但**GitHub 在国内网络下可能打不开或很慢**。
 
 ## 首次启动
 
 首次启动会把内置运行时解压到 `%APPDATA%\deepseek-harness-desktop\runtime`（约 155 MB），期间显示「正在初始化，请稍候...」，通常 20–40 秒。之后启动很快。
 
 ## 常见问题
+
+**下载打不开 / 很慢？**
+GitHub 在国内网络下常被阻断。请用上面第一条 OSS 直链，那是同一个安装包。
 
 **为什么第一次打开要重新配置模型 / 填 API key？**
 桌面版使用**独立的数据目录**（`%APPDATA%\deepseek-harness-desktop\dsh-home`），与命令行 `dsh` 的 `~/.dsh` 完全隔离，所以需要单独配置一次。
@@ -39,9 +46,6 @@
 
 **提示「需要更新」且无法跳过？**
 当前版本低于更新源声明的最低支持版本，请按提示完成更新。
-
-**便携版收不到更新？**
-便携版没有可供替换的安装目录，请改用安装版。
 
 **能和官方 `dsh web` 同时运行吗？**
 可以。两者数据目录与端口都相互独立，互不干扰。
