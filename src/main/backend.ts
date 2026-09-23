@@ -93,6 +93,24 @@ function resolveBackendCwd(root: string): string {
   return app.isPackaged ? root : process.cwd()
 }
 
+/**
+ * 桌面版使用**独占的**数据目录，不与 CLI 的 `~/.dsh` 共用。
+ *
+ * 两者内嵌的 dsh 版本不同，而 `~/.dsh` 下的凭据格式、`profiles` 模块落点、
+ * 会话日志格式都只对应某一个版本 —— 实测旧版 dsh 读新版写出的
+ * `.credentials.yaml` 时（`version` 是数字而非字符串）直接抛错、进程 exit 1，
+ * 桌面端表现为 "dsh process exited early, code: 1"。
+ *
+ * 隔离之后，桌面版的启动不再受用户 CLI 环境影响（代价是首次要单独配置一次模型凭据）。
+ */
+function resolveDshHomeEnv(): Record<string, string> {
+  if (!app.isPackaged) {
+    return process.env.DSH_HOME === undefined ? {} : { DSH_HOME: process.env.DSH_HOME }
+  }
+
+  return { DSH_HOME: path.join(app.getPath('userData'), 'dsh-home') }
+}
+
 export function startBackend(port: number): BackendHandle {
   const root = resolveBackendRoot()
   const bin = resolveBackendBin(root)
@@ -109,6 +127,7 @@ export function startBackend(port: number): BackendHandle {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
+        ...resolveDshHomeEnv(),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
