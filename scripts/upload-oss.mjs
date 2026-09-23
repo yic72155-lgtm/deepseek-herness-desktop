@@ -92,13 +92,29 @@ const client = new OSS({ region: REGION, accessKeyId, accessKeySecret, bucket: B
 
 for (const item of plan) {
   const content = item.file ?? item.body
-  await client.put(item.key, content, {
-    headers: {
-      'Content-Type': contentTypeOf(item.key),
-      'Cache-Control': item.cache,
-    },
-  })
-  console.log(`uploaded  ${item.key}`)
+  try {
+    await client.put(item.key, content, {
+      headers: {
+        'Content-Type': contentTypeOf(item.key),
+        'Cache-Control': item.cache,
+      },
+    })
+    console.log(`uploaded  ${item.key}`)
+  } catch (error) {
+    // 把阿里云返回的错误码与 requestId 打出来，否则 CI 日志里只有一句 "command failed"。
+    console.error(`\n上传失败：${item.key}`)
+    console.error('  name      :', error?.name ?? '-')
+    console.error('  code      :', error?.code ?? '-')
+    console.error('  status    :', error?.status ?? '-')
+    console.error('  message   :', error?.message ?? String(error))
+    console.error('  requestId :', error?.requestId ?? '-')
+    console.error('\n常见原因对照：')
+    console.error('  InvalidAccessKeyId / SignatureDoesNotMatch → Secret 值不对或名字拼错')
+    console.error('  AccessDenied                              → RAM 策略没覆盖该 bucket')
+    console.error('  NoSuchBucket                              → OSS_BUCKET 名字不对')
+    console.error('  net timeout / ECONNRESET                  → 网络问题，重跑即可')
+    process.exit(1)
+  }
 }
 
 console.log(`\n完成。更新源：https://${BUCKET}.${REGION}.aliyuncs.com/${PREFIX}/`)
